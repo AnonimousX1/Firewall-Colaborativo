@@ -52,7 +52,7 @@ def executar_ciclo_orquestracao(
     main.aplicar_bloqueios_cadeia_publica(caminho_arquivo_json)
 
     # # ETAPA 4: A avaliação de denuncias na “begs” da cadeia.
-    main.avaliar_mendigos(nome_cadeia, chave_privada, recompensa_like = 10, min_reports_desafio = 50)
+    main.avaliar_mendigos(caminho_arquivo_json, nome_cadeia, chave_privada, recompensa_like = 10, min_reports_desafio = 50)
 
     # ETAPA 5: Propaga para a rede eventuais dislikes/posts que nosso nó gerou neste ciclo
     # Não funciona
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     
     # Tempo entre cada sincronização (em segundos)
     # Para testes rápidos no laboratório, use 15 ou 30 segundos.
-    INTERVALO_SEGUNDOS = 30
+    INTERVALO_SEGUNDOS = 60
 
 
     NOME_CADEIA: str = "#firewall-test"

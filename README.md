@@ -83,14 +83,28 @@ Como o orquestrador executa como daemon sem intervenção interativa, configure 
 
 ```bash
 sudo visudo
-
 ```
 
 Adicione a linha abaixo ao final do arquivo, substituindo `seu_usuario` pelo seu usuário do sistema:
 
 ```sudoers
 seu_usuario ALL=(ALL) NOPASSWD: /usr/sbin/ufw
+```
 
+### Configuração de replicação Fail2ban
+Crie o arquivo:
+```
+freechains_ufw.conf 
+```
+Na pasta `/etc/fail2ban/action.d/`
+
+Adicione as premissas na linha antes de `Init`
+```
+# O Fail2ban injeta o IP malicioso na tag <ip>
+actionban = /usr/bin/python3 "caminho_deste_projeto_na_sua_máquina" >Firewall-Colaborativo/firewall.py ban <ip> <time> <name>
+
+# Executado automaticamente quando o tempo de banimento (bantime) expira
+actionunban = /usr/bin/python3 "caminho_deste_projeto_na_sua_máquina" Firewall-Colaborativo/firewall.py unban <ip>
 ```
 
 ### Configuração dos Nós

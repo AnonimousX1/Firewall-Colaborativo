@@ -72,7 +72,8 @@ def sincronizar_cadeia(nome_cadeia: str, endereco_remoto: str) -> str | None:
         return None
 
 def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_privada: Path, chave_publica: str = "", modo: str = "action", motivo: str = "") -> bool:
-    
+    import os
+
     if modo == "action":
         comando = [
             "freechains", "chain", nome_cadeia, "like", 
@@ -82,7 +83,7 @@ def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_pr
         print(f"Enviando {qtd_likes} like(s) para o bloco {hash_mensagem[:25]}...")
     else:
         # Salva a chave pública em um arquivo temporário .pub para o Freechains ler sem erro
-        caminho_pub_temp = Path("/tmp/infrator_temp.pub")
+        caminho_pub_temp = Path(f"/tmp/infrator_{os.getpid()}_temp.pub")
         caminho_pub_temp.write_text(chave_publica + "\n", encoding="utf-8")
         
         comando = [
@@ -91,6 +92,8 @@ def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_pr
             f"--sign={chave_privada}", f"--why={motivo}"
         ]
         print(f"Enviando {qtd_likes} like(s) para o AUTOR ({chave_publica[:15]}...)...")
+    
+    caminho_pub_temp.unlink(missing_ok=True)
     
     try:
         subprocess.run(comando, check=True)
@@ -101,7 +104,8 @@ def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_pr
         return False
 
 def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, chave_privada: Path, chave_publica: str = "", modo: str = "action", motivo: str = "") -> bool:
-    
+    import os
+
     if modo == "action":
         comando = [
             "freechains", "chain", nome_cadeia, "dislike", 
@@ -111,7 +115,7 @@ def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, ch
         print(f"Enviando {qtd_dislikes} dislikes para o bloco {hash_mensagem[:15]}...")
     else:
         # Salva a chave pública em um arquivo temporário .pub para o Freechains ler sem erro
-        caminho_pub_temp = Path("/tmp/infrator_temp.pub")
+        caminho_pub_temp = Path(f"/tmp/infrator_{os.getpid()}_temp.pub")
         caminho_pub_temp.write_text(chave_publica + "\n", encoding="utf-8")
         
         comando = [
@@ -120,6 +124,8 @@ def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, ch
             f"--sign={chave_privada}", f"--why={motivo}"
         ]
         print(f"Enviando {qtd_dislikes} dislikes para o AUTOR ({chave_publica[:25]}...)...")
+
+    caminho_pub_temp.unlink(missing_ok=True)
     
     try:
         subprocess.run(comando, check=True)
@@ -364,13 +370,13 @@ def consultar_cadeia_publica(nome_cadeia: str, endereco_remoto: str) -> None:
         
     print(f"Consulta concluída! {novos_blocos_processados} novo(s) post(s) analisado(s).")
 
-def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int = 10, min_reports_desafio: int = 50) -> None:
+def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Path, recompensa_like: int = 10, min_reports_desafio: int = 50) -> None:
     """
-    Regras do Crivo de Mendigos (--beg):
-    1. Tolerância ZERO: Qualquer mendigo que errar 1 único beg (JSON inválido ou IP inválido/privado)
-       já é considerado malicioso e recebe punicao_2 (dislike no author) imediatamente.
-    2. Desafio de Entrada: O mendigo só recebe like se tiver pelo menos 50 reports (min_reports_desafio)
-       e 100% deles forem legítimos.
+    Regras do Crivo de Mendigos (--beg) com persistência em denuncias.json:
+    1. Tolerância ZERO: Se errar qualquer beg (JSON malformado ou IP inválido/privado),
+       aplica punicao_2 (dislike no autor) e registra o hash em 'begs_reprovados' no disco.
+    2. Idempotência: Begs já reprovados são pulados para evitar queima contínua de reps.
+    3. Desafio: Apenas mendigos com min_reports_desafio válidos recebem like.
     """
     import utils
 
@@ -381,20 +387,45 @@ def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int
         print(f" -> Reputação atual ({reputacao}) insuficiente para avaliar novatos.")
         return
 
+    # 1. Carrega o estado persistente do denuncias.json
+    if caminho_arquivo.exists():
+        with open(caminho_arquivo, "r", encoding="utf-8") as f:
+            perfis: dict[str, dict] = json.load(f)
+    else:
+        perfis = {}
+
     cmd_begs = ["freechains", "chain", nome_cadeia, "list", "begs"]
     resultado_begs = subprocess.run(cmd_begs, capture_output=True, text=True)
 
-    # Dicionário para agrupar os begs de cada candidato (mendigo)
     candidatos: dict[str, dict] = {}
+    modificou_json: bool = False
 
     for linha in resultado_begs.stdout.splitlines():
         hash_beg = linha.strip()
         if not hash_beg:
             continue
 
-        # Descobre qual é a chave pública do mendigo que postou este beg
         autor_mendigo: str = obter_autor_bloco(nome_cadeia, hash_beg)
         if autor_mendigo == "Desconhecido":
+            continue
+
+        # Inicializa o perfil do mendigo no dicionário de perfis caso ainda não exista
+        if autor_mendigo not in perfis:
+            perfis[autor_mendigo] = {
+                "chave_publica": autor_mendigo,
+                "nome_cadeia": nome_cadeia,
+                "tipo_perfil": "colaborador",
+                "contagem_punitiva": 0,
+                "blocos_invalidos": [],
+                "blocos_ja_punidos": [],
+                "denuncias_validas": [],
+                "begs_reprovados": []
+            }
+
+        reprovados_persistidos = perfis[autor_mendigo].setdefault("begs_reprovados", [])
+
+        # Se este beg já foi reprovado e punido em ciclos anteriores, pula direto!
+        if hash_beg in reprovados_persistidos:
             continue
 
         if autor_mendigo not in candidatos:
@@ -403,7 +434,7 @@ def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int
                 "bloco_erro": None
             }
 
-        # Se este mendigo já cometeu um erro em um bloco anterior, nem precisamos ler o resto dele
+        # Se o mendigo já falhou em outro bloco nesta rodada, não processa o restante dele
         if candidatos[autor_mendigo]["bloco_erro"] is not None:
             continue
 
@@ -417,7 +448,6 @@ def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int
             ip_malicioso = dados.get("ip_malicioso")
             timestamp = dados.get("timestamp", "")
 
-            # Verifica se o report é 100% legítimo
             if (
                 utils.verifica_formato_ip(ip_malicioso) 
                 and not utils.verificar_ip_privado(ip_malicioso) 
@@ -433,19 +463,19 @@ def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int
             candidatos[autor_mendigo]["bloco_erro"] = hash_beg
 
     if not candidatos:
-        print(" -> Nenhum mendigo na fila no momento.")
+        print(" -> Nenhum novo mendigo pendente de avaliação.")
         return
 
-    # Julgamento final de cada mendigo
+    # 2. Avaliação dos candidatos encontrados
     for autor_mendigo, status in candidatos.items():
         bloco_erro = status["bloco_erro"]
         lista_validos = status["begs_validos"]
         qtd_validos = len(lista_validos)
 
-        # REGRA 1: Tolerância Zero -> Se errou qualquer coisa, é malicioso (Punição 2 direto no autor!)
+        # REGRA 1: Tolerância Zero -> Punição imediata e gravação no histórico persistente
         if bloco_erro is not None:
             print(f" -> [TOLERÂNCIA ZERO] Mendigo {autor_mendigo[:20]}... cometeu erro! Aplicando punicao_2.")
-            punicao_2(
+            sucesso = punicao_2(
                 bloco=bloco_erro,
                 nome_cadeia=nome_cadeia,
                 chave_privada=chave_privada,
@@ -453,10 +483,14 @@ def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int
                 qtd_dislikes=recompensa_like,
                 motivo="Mendigo malicioso. Erro no periodo probatorio."
             )
+            if sucesso:
+                perfis[autor_mendigo]["begs_reprovados"].append(bloco_erro)
+                perfis[autor_mendigo]["tipo_perfil"] = "infrator"
+                modificou_json = True
 
-        # REGRA 2: É 100% legítimo e já atingiu a meta de 50 reports!
+        # REGRA 2: Atingiu o desafio de 50 denúncias legítimas
         elif qtd_validos >= min_reports_desafio:
-            print(f" -> [APROVADO] Mendigo {autor_mendigo[:20]}... completou o desafio ({qtd_validos}/{min_reports_desafio} reports válidos)!")
+            print(f" -> [APROVADO] Mendigo {autor_mendigo[:20]}... completou o desafio ({qtd_validos}/{min_reports_desafio} válidos)!")
             for hash_valido in lista_validos:
                 like_mensagem(
                     nome_cadeia=nome_cadeia,
@@ -467,9 +501,14 @@ def avaliar_mendigos(nome_cadeia: str, chave_privada: Path, recompensa_like: int
                     motivo="Desafio de 50 reports concluido com sucesso"
                 )
 
-        # REGRA 3: É 100% legítimo até agora, mas ainda tem menos de 50 reports
+        # REGRA 3: Em progresso do desafio
         else:
-            print(f" -> [EM DESAFIO] Mendigo {autor_mendigo[:20]}... possui {qtd_validos}/{min_reports_desafio} reports legítimos. Aguardando completar a meta.")
+            print(f" -> [EM DESAFIO] Mendigo {autor_mendigo[:20]}... possui {qtd_validos}/{min_reports_desafio} reports legítimos. Aguardando a meta.")
+
+    # 3. Persiste no arquivo se houveram novas punições
+    if modificou_json:
+        with open(caminho_arquivo, "w", encoding="utf-8") as f:
+            json.dump(perfis, f, indent=4, ensure_ascii=False)
 
 def avaliar_punicoes(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Path) -> None:
     print("\n--- Relatório de Avaliação de Infratores---")
@@ -630,7 +669,6 @@ if __name__ == "__main__":
 
     caminho_base_chaves: Path = Path("/home/kali/")
     NOME_CADEIA: str = "#firewall-test"
-    #NOME_CADEIA: str = "#p2p"
 
     sincronizar_cadeia(NOME_CADEIA, "10.0.1.222:8330")
 
