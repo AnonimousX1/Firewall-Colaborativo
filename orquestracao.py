@@ -38,7 +38,7 @@ def executar_ciclo_orquestracao(
     print(f"============================================================")
 
     # ETAPA 1: Sincroniza (recv/clone), valida blocos novos e gera/atualiza o denuncias.json
-    main.consultar_cadeia_publica(nome_cadeia, endereco_remoto)
+    main.consultar_cadeia_publica(caminho_arquivo_json, nome_cadeia, endereco_remoto)
 
     # Verifica se o arquivo denuncias.json foi criado antes de seguir para as etapas 2 e 3
     if not caminho_arquivo_json.exists():
@@ -98,22 +98,16 @@ def iniciar_daemon(
 
 if __name__ == "__main__":
     # ---- Configurações do Ambiente ----
-    
-    # Tempo entre cada sincronização (em segundos)
-    # Para testes rápidos no laboratório, use 15 ou 30 segundos.
-    INTERVALO_SEGUNDOS = 60
+    import configuracao
 
-
-    NOME_CADEIA: str = "#firewall-test"
-    ENDERECO_REMOTO: str = "10.0.1.222:8330"
-    ARQUIVO_DENUNCIAS: Path = Path("denuncias.json")
-    CHAVE_PRIVADA: Path = Path("/home/kali/henrxque")
+    ARQUIVO_DENUNCIAS_PATH: Path = Path(configuracao.ARQUIVO_DENUNCIAS)
+    CHAVE_PRIVADA_PATH: Path = Path(configuracao.CHAVE_PRIVADA)
 
 
     iniciar_daemon(
-        nome_cadeia=NOME_CADEIA,
-        endereco_remoto=ENDERECO_REMOTO,
-        caminho_arquivo_json=ARQUIVO_DENUNCIAS,
-        chave_privada=CHAVE_PRIVADA,
-        intervalo_segundos=INTERVALO_SEGUNDOS
+        nome_cadeia= configuracao.NOME_CADEIA,
+        endereco_remoto= configuracao.ENDERECO_REMOTO,
+        caminho_arquivo_json=ARQUIVO_DENUNCIAS_PATH,
+        chave_privada=CHAVE_PRIVADA_PATH,
+        intervalo_segundos=configuracao.INTERVALO_SEGUNDOS
     )

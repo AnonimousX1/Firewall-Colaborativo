@@ -155,6 +155,8 @@ def consultar_reputacao(nome_cadeia: str, chave: Path | str) -> int:
       - Path ou string de caminho para chave privada ou pública (ex: /home/kali/henrxque[.pub])
       - String de texto da chave pública SSH (ex: 'ssh-ed25519 AAAAC3Nz...')
     """
+    import os
+
     arquivo_temporario: Path | None = None
     caminho_pub: Path
 
@@ -288,13 +290,11 @@ def reportar_ip(nome_cadeia: str, chave_privada: Path, ip_alvo: str, qtd_likes:i
         print(f"IP {ip_alvo} ainda não foi reportado na cadeia {nome_cadeia}. Postando relato...")
         postar(nome_cadeia, chave_privada, ip_alvo, motivo, timestamp)
 
-def consultar_cadeia_publica(nome_cadeia: str, endereco_remoto: str) -> None:
+def consultar_cadeia_publica(caminho_arquivo: Path, nome_cadeia: str, endereco_remoto: str) -> None:
     import utils
     print("\n--- Consultando cadeia publica (Incremental) ---")
 
     sincronizar_cadeia(nome_cadeia, endereco_remoto)
-    
-    caminho_arquivo = Path("denuncias.json")
     
     # 1. Carrega o histórico anterior (se já existir) para não começar do zero!
     if caminho_arquivo.exists():
@@ -696,16 +696,16 @@ def aplicar_bloqueios_cadeia_publica(caminho_arquivo: Path) -> None:
     print(f"Total de novos IPs bloqueados nesta rodada: {novos_bloqueios}")
 
 if __name__ == "__main__":
+    import configuracao
     # ---- Configurações do Ambiente ----
 
-    caminho_base_chaves: Path = Path("/home/kali/")
-    NOME_CADEIA: str = "#firewall-test"
+    CAMINHO_BASE_CHAVES_PATH: Path = Path(configuracao.CHAVE_PRIVADA)
 
-    '''
-    sincronizar_cadeia(NOME_CADEIA, "10.0.1.222:8330")
+    sincronizar_cadeia(configuracao.NOME_CADEIA, configuracao.ENDERECO_REMOTO)
     
-    print(f"Reputação: {consultar_reputacao(NOME_CADEIA, Path(caminho_base_chaves, 'servidor'))}")
-    #enviar_mensagem(NOME_CADEIA, "oioi", Path(caminho_base_chaves, "henrxque"))
-    #consultar_cadeia_publica(NOME_CADEIA, "10.0.1.222:8330")
-    print(f"Buscar mensagem: {buscar_mensagem(NOME_CADEIA, "oioi")}")
+    '''
+    print(f"Reputação: {consultar_reputacao(configuracao.NOME_CADEIA, CAMINHO_BASE_CHAVES_PATH)}")
+    enviar_mensagem(configuracao.NOME_CADEIA, "oioi", CAMINHO_BASE_CHAVES_PATH)
+    consultar_cadeia_publica(CAMINHO_BASE_CHAVES_PATH, configuracao.NOME_CADEIA, configuracao.ENDERECO_REMOTO)
+    print(f"Buscar mensagem: {buscar_mensagem(configuracao.NOME_CADEIA, "oioi")}")
     '''

@@ -15,8 +15,8 @@ def aplicar_bloqueio(
     
     comando = ["sudo", "ufw", "prepend", "deny", "from", ip_alvo, "to", "any"]
     try:
-        subprocess.run(comando, check=True, capture_output=True, text=True)
-        #print(f"IP {ip_alvo} bloqueado com sucesso. Saída: {resultado.stdout.strip()}")
+        resultado = subprocess.run(comando, check=True, capture_output=True, text=True)
+        print(f"IP {ip_alvo} bloqueado com sucesso. Saída: {resultado.stdout.strip()}")
     except subprocess.CalledProcessError as e:
         print(f"Erro ao bloquear o IP {ip_alvo}: {e.stderr.strip()}")
         return None
@@ -49,6 +49,7 @@ def aplicar_desbloqueio(ip_alvo: str) -> None:
 if __name__ == "__main__":
     import main as freechains
     from pathlib import Path
+    import configuracao
 
     if len(sys.argv) < 3:
         print("Uso: firewall_manager.py <ban|unban> <ip_alvo> [timestamp] [motivo]")
@@ -75,14 +76,10 @@ if __name__ == "__main__":
         # ---- Configurações do Ambiente ----
 
         # Integração com aplicação
-        # A variável  caminho_base_chaves, pode mudar de acordo com localização das suas chaves
-        caminho_base_chaves: Path = Path("/home/kali")
-        
         # A variável NOME_CADEIA, pode mudar de acordo com a cadeia você está utilizando
-        NOME_CADEIA: str = "#firewall-test"
         
         # Aqui você chama a função que já construiu no outro arquivo
-        freechains.reportar_ip(NOME_CADEIA, Path(caminho_base_chaves, "henrxque"), ip_alvo, 1, motivo, dt_timestamp)
+        freechains.reportar_ip(configuracao.NOME_CADEIA, Path(configuracao.CHAVE_PRIVADA), ip_alvo, 1, motivo, dt_timestamp)
 
     elif acao == "unban":
         aplicar_desbloqueio(ip_alvo)

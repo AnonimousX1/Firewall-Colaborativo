@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 def executar_setup():
+    import configuracao
     # 1. Verifica se está rodando como root
     if os.geteuid() != 0:
         print("Erro: Este script precisa ser executado como root.")
@@ -21,7 +22,7 @@ def executar_setup():
 
     # 3. Identifica dinamicamente o caminho absoluto do projeto
     diretorio_atual = Path(__file__).parent.resolve()
-    caminho_firewall = diretorio_atual / "firewall.py"
+    caminho_firewall: Path = diretorio_atual / "firewall.py"
 
     if not caminho_firewall.exists():
         print(f"Erro: O arquivo {caminho_firewall} não foi encontrado na pasta atual!")
@@ -32,8 +33,8 @@ def executar_setup():
     print(f" -> Caminho do script: {caminho_firewall}")
 
     # 4. Configurar SUDOERS de forma segura (usando a pasta sudoers.d)
-    caminho_sudoers = Path(f"/etc/sudoers.d/ufw_{usuario}")
-    conteudo_sudoers = f"{usuario} ALL=(ALL) NOPASSWD: /usr/sbin/ufw\n"
+    caminho_sudoers: Path = Path(f"{configuracao.CAMINHO_SUDOERS}{usuario}")
+    conteudo_sudoers: str = f"{usuario} {configuracao.CONTEUDO_SUDOERS}\n"
     
     try:
         caminho_sudoers.write_text(conteudo_sudoers)
@@ -43,25 +44,32 @@ def executar_setup():
         print(f" -> [ERRO] Falha ao configurar sudoers: {e}")
 
     # 5. Criar a Action do Fail2ban
-    diretorio_action = Path("/etc/fail2ban/action.d")
+    diretorio_action = Path(configuracao.DIRETORIO_ACTION)
     if not diretorio_action.exists():
         print(" -> [AVISO] Fail2ban não encontrado em /etc/fail2ban/. Instale-o primeiro.")
     else:
-        caminho_action = diretorio_action / "freechains-p2p.conf"
+        caminho_action = diretorio_action / "freechains_ufw.conf"
         conteudo_action = f"""[Definition]
+
+# Nao precisamos de comandos ao iniciar ou parar o servico para essa acao
 actionstart =
 actionstop =
 actioncheck =
 
 # O Fail2ban roda como root, mas força a execução do script Python com o seu usuário
+
+# O Fail2ban injeta o IP malicioso na tag <ip>
 actionban = sudo -u {usuario} /usr/bin/python3 {caminho_firewall} ban <ip> <time> <name>
+
+# Executado automaticamente quando o tempo de banimento (bantime) expira
 actionunban = sudo -u {usuario} /usr/bin/python3 {caminho_firewall} unban <ip>
 
 [Init]
+# Vazio
 """
         try:
             caminho_action.write_text(conteudo_action)
-            print(" -> [OK] Action do Fail2ban (freechains-p2p.conf) criada.")
+            print(" -> [OK] Action do Fail2ban (freechains_ufw.conf) criada.")
             
             # Tenta recarregar o Fail2ban para aplicar as mudanças
             subprocess.run(["fail2ban-client", "reload"], capture_output=True)

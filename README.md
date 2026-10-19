@@ -85,7 +85,7 @@ seu_usuario ALL=(root) NOPASSWD: /usr/sbin/ufw
 
 ### Configuração dos nós
 
-Edite o bloco de configurações no final de `orquestracao.py`:
+Edite o bloco de configurações no final de `configuracao.py`:
 
 * `NOME_CADEIA`: cadeia Freechains usada pelo nó, por exemplo `#firewall-test`.
 * `ENDERECO_REMOTO`: endereço `IP:porta` do par usado para receber atualizações, por exemplo `10.0.1.222:8330`.
@@ -95,25 +95,26 @@ Edite o bloco de configurações no final de `orquestracao.py`:
 
 Execute os scripts a partir da raiz do repositório para que o arquivo `denuncias.json` seja encontrado no local esperado.
 
-O acionamento pelo Fail2ban usa configurações próprias em `firewall.py`: ajuste `caminho_base_chaves`, o nome da chave privada (`henrxque`, no exemplo atual) e `NOME_CADEIA` para o seu ambiente. A cadeia deve ser a mesma configurada no orquestrador. A chave pública correspondente deve estar disponível com o sufixo `.pub`.
+O acionamento pelo Fail2ban usa configurações próprias em `firewall.py`: ajuste `CAMINHO_BASE_CHAVES`, o nome da chave privada (`henrxque`, no exemplo atual) e `NOME_CADEIA` para o seu ambiente. A cadeia deve ser a mesma configurada no orquestrador. A chave pública correspondente deve estar disponível com o sufixo `.pub`.
 
 ### Integração com Fail2ban
 
-Crie `/etc/fail2ban/action.d/freechains-ufw.conf` com o conteúdo abaixo, substituindo `/caminho/absoluto/Firewall-Colaborativo` pelo caminho real do projeto:
+Crie `/etc/fail2ban/action.d/freechains_ufw.conf` com o conteúdo abaixo, substituindo `/caminho/absoluto/Firewall-Colaborativo` pelo caminho real do projeto:
 
 ```ini
 [Definition]
-actionban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py ban <ip> "" "<name>"
+actionban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py ban <ip> <time> <name>
+
 actionunban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py unban <ip>
 ```
 
-O argumento de timestamp é deixado vazio para que `firewall.py` use o horário atual; `<name>` é usado como motivo. Na configuração da jail desejada, inclua a ação `freechains-ufw` junto às ações de banimento que já utiliza. Por exemplo:
+O argumento de timestamp é deixado vazio para que `firewall.py` use o horário atual; `<name>` é usado como motivo. Na configuração da jail desejada, inclua a ação `freechains_ufw` junto às ações de banimento que já utiliza. Por exemplo:
 
 ```ini
 [sshd]
 enabled = true
 action = %(action_)s
-         freechains-ufw
+         freechains_ufw
 ```
 
 Depois de configurar, recarregue o Fail2ban e confira o estado da jail:
