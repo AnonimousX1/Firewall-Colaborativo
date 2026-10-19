@@ -93,8 +93,6 @@ def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_pr
         ]
         print(f"Enviando {qtd_likes} like(s) para o AUTOR ({chave_publica[:15]}...)...")
     
-    caminho_pub_temp.unlink(missing_ok=True)
-    
     try:
         subprocess.run(comando, check=True)
         print(" -> Like enviado com sucesso!")
@@ -102,6 +100,10 @@ def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_pr
     except subprocess.CalledProcessError as e:
         print(f" -> Erro ao enviar like: {e}")
         return False
+    finally:
+        # Limpa o arquivo temporário se ele foi criado
+        if caminho_pub_temp and caminho_pub_temp.exists():
+            caminho_pub_temp.unlink(missing_ok=True)
 
 def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, chave_privada: Path, chave_publica: str = "", modo: str = "action", motivo: str = "") -> bool:
     import os
@@ -124,8 +126,6 @@ def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, ch
             f"--sign={chave_privada}", f"--why={motivo}"
         ]
         print(f"Enviando {qtd_dislikes} dislikes para o AUTOR ({chave_publica[:25]}...)...")
-
-    caminho_pub_temp.unlink(missing_ok=True)
     
     try:
         subprocess.run(comando, check=True)
@@ -134,6 +134,10 @@ def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, ch
     except subprocess.CalledProcessError as e:
         print(f" -> Erro ao enviar dislike: {e}")
         return False
+    finally:
+        # Limpa o arquivo temporário se ele foi criado
+        if caminho_pub_temp and caminho_pub_temp.exists():
+            caminho_pub_temp.unlink(missing_ok=True)
 
 def revoke_mensagem(nome_cadeia: str, hash_mensagem: str, chave_privada: Path, motivo: str = "") -> None:
     comando = ["freechains", "chain", nome_cadeia, "revoke", "1000", hash_mensagem, f"--sign={chave_privada}", f"--why={motivo}"]
@@ -144,23 +148,46 @@ def revoke_mensagem(nome_cadeia: str, hash_mensagem: str, chave_privada: Path, m
     except subprocess.CalledProcessError as e:
         print(f"Erro ao revogar mensagem: {e}")
 
-def consultar_reputacao(nome_cadeia: str, chave_publica: Path) -> int:
-    print(f"Consultando reputação na cadeia {nome_cadeia} com chave pública {chave_publica} ...")
+def consultar_reputacao(nome_cadeia: str, chave: Path | str) -> int:
+    """
+    Consulta a reputação de um autor no Freechains.
+    Aceita:
+      - Path ou string de caminho para chave privada ou pública (ex: /home/kali/henrxque[.pub])
+      - String de texto da chave pública SSH (ex: 'ssh-ed25519 AAAAC3Nz...')
+    """
+    arquivo_temporario: Path | None = None
+    caminho_pub: Path
 
-    # Garante que sempre vai ler o arquivo .pub, mesmo se receber a chave privada
-    if chave_publica.suffix != ".pub":
-        chave_publica = chave_publica.with_suffix(".pub")
+    # Caso 1: Foi passada a string do texto da chave SSH pura
+    if isinstance(chave, str) and chave.startswith("ssh-"):
+        # Cria arquivo temporário seguro com o PID do processo atual
+        arquivo_temporario = Path(f"/tmp/reps_{os.getpid()}_temp.pub")
+        arquivo_temporario.write_text(chave.strip() + "\n", encoding="utf-8")
+        caminho_pub = arquivo_temporario
 
-    comando = ["freechains", "chain", nome_cadeia, "reps", "author", str(chave_publica)]
-    
+    # Caso 2: Foi passado um caminho de arquivo (Path ou str)
+    else:
+        caminho_pub = Path(chave)
+        # Se apontou para a chave privada, redireciona para a .pub
+        if caminho_pub.suffix != ".pub":
+            caminho_pub = caminho_pub.with_suffix(".pub")
+
+    comando = ["freechains", "chain", nome_cadeia, "reps", "author", str(caminho_pub)]
+
     try:
         resultado = subprocess.run(comando, check=True, capture_output=True, text=True)
-        resultado_inteiro: int = int(resultado.stdout.strip())
-        print("Consulta de reputação concluída com sucesso!")
+        resultado_inteiro = int(resultado.stdout.strip())
         return resultado_inteiro
     except subprocess.CalledProcessError as e:
-        print(f"Erro ao consultar reputação: {e}")
+        print(f"Erro ao consultar reputação: {e.stderr.strip() if e.stderr else e}")
         return 0
+    except (ValueError, FileNotFoundError) as e:
+        print(f"Erro ao processar chave pública: {e}")
+        return 0
+    finally:
+        # Limpa o arquivo temporário se ele foi criado
+        if arquivo_temporario and arquivo_temporario.exists():
+            arquivo_temporario.unlink(missing_ok=True)
 
 def obter_autor_bloco(nome_cadeia: str, hash_bloco: str) -> str:
     cmd = ["freechains", "chain", nome_cadeia, "get", "metadata", hash_bloco]
@@ -555,6 +582,10 @@ def avaliar_punicoes(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
         taxa_erro_percentual: float = (pontos_erro / base_total) * 100
 
         custo_dislike: int = int(round(taxa_erro_percentual))
+        
+        if custo_dislike <= 0:
+            print(f" -> Reputação insuficiente para punir {autor[:8]}... no momento.")
+            continue
 
         print(f"\nAutor: {autor[:25]}...")
         print(f" -> Acertos: {qtd_acertos} | Pontos Punitivos: {pontos_erro} | Taxa de Erro: {taxa_erro_percentual:.1f}%")
@@ -670,12 +701,11 @@ if __name__ == "__main__":
     caminho_base_chaves: Path = Path("/home/kali/")
     NOME_CADEIA: str = "#firewall-test"
 
-    sincronizar_cadeia(NOME_CADEIA, "10.0.1.222:8330")
-
     '''
-    print(f"Reputação: {consultar_reputacao(NOME_CADEIA, Path(caminho_base_chaves, "henrxque.pub"))}")
+    sincronizar_cadeia(NOME_CADEIA, "10.0.1.222:8330")
+    
+    print(f"Reputação: {consultar_reputacao(NOME_CADEIA, Path(caminho_base_chaves, 'servidor'))}")
     #enviar_mensagem(NOME_CADEIA, "oioi", Path(caminho_base_chaves, "henrxque"))
-    like_mensagem(NOME_CADEIA, "c028999559d7cdc87b07db6c49e9dd89797cc1b2", 1, Path(caminho_base_chaves, "henrxque"))
-    consultar_cadeia_publica(NOME_CADEIA, "10.0.1.222:8330")
+    #consultar_cadeia_publica(NOME_CADEIA, "10.0.1.222:8330")
     print(f"Buscar mensagem: {buscar_mensagem(NOME_CADEIA, "oioi")}")
     '''

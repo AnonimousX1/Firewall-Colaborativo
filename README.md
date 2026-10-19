@@ -57,105 +57,97 @@ O daemon principal (`orquestracao.py`) opera em loop contínuo executando period
 
 ### Pré-requisitos
 
-* Sistema Operacional Linux (Debian, Ubuntu, Kali Linux ou WSL2).
-* Python 3.10 ou superior (utiliza estritamente módulos padrão: `json`, `subprocess`, `ipaddress`, `pathlib`, `datetime`).
-* Binário e daemon do Freechains instalados e em execução:
+* Linux (Debian, Ubuntu, Kali Linux ou WSL2), Python 3.10 ou superior e `pip`.
+* Freechains v0.20 instalado, com o daemon em execução e acessível pelo mesmo usuário que executará os scripts.
+* UFW instalado. O usuário que executar os scripts precisa poder chamar `sudo ufw` sem interação.
+* Um par de chaves SSH aceito pelo Freechains. O caminho da chave privada é configurado no projeto; o arquivo de chave pública correspondente também deve estar disponível.
+* Fail2ban é necessário somente para a integração automática de banimento.
 
-
-```bash
-freechains daemon start --port=<porta que te convém>
-```
-
-
-* Pacote `ufw` instalado com permissão de execução via `sudo`.
-
-
-* Par de chaves SSH (`ed25519`) gerado para assinatura no Freechains (`~/.freechains/` ou diretório personalizado).
-
-
-* Fail2ban instalado para gatilhos dinâmicos de banimento via arquivo `firewall.py`.
-
-
-
-### Configuração de Privilégios (Sudoers)
-
-Como o orquestrador executa como daemon sem intervenção interativa, configure o `sudoers` para permitir a manipulação de regras do UFW sem solicitação de senha:
+Inicie o daemon do Freechains antes de executar o projeto. Ajuste a porta conforme o ambiente e use a mesma porta no endereço remoto dos outros nós:
 
 ```bash
-sudo visudo
+freechains daemon start --port=8330
 ```
 
-Adicione a linha abaixo ao final do arquivo, substituindo `seu_usuario` pelo seu usuário do sistema:
+### Configuração do UFW
+
+O código chama `sudo ufw`; para que o daemon e a ação do Fail2ban não fiquem aguardando uma senha, configure uma regra restrita ao binário do UFW. Confira o caminho instalado com `command -v ufw` e use esse caminho na regra:
+
+```bash
+sudo visudo -f /etc/sudoers.d/firewall-colaborativo
+```
+
+Inclua a linha abaixo, substituindo `seu_usuario` e o caminho do UFW conforme o sistema:
 
 ```sudoers
-seu_usuario ALL=(ALL) NOPASSWD: /usr/sbin/ufw
+seu_usuario ALL=(root) NOPASSWD: /usr/sbin/ufw
 ```
 
-### Configuração de replicação Fail2ban
-Crie o arquivo:
+### Configuração dos nós
+
+Edite o bloco de configurações no final de `orquestracao.py`:
+
+* `NOME_CADEIA`: cadeia Freechains usada pelo nó, por exemplo `#firewall-test`.
+* `ENDERECO_REMOTO`: endereço `IP:porta` do par usado para receber atualizações, por exemplo `10.0.1.222:8330`.
+* `CHAVE_PRIVADA`: caminho da chave privada usada para assinar ações.
+* `INTERVALO_SEGUNDOS`: intervalo entre ciclos; o padrão atual é `60` segundos.
+* `ARQUIVO_DENUNCIAS`: mantenha `Path("denuncias.json")`. O processamento em `main.py` também usa esse nome relativo ao diretório atual.
+
+Execute os scripts a partir da raiz do repositório para que o arquivo `denuncias.json` seja encontrado no local esperado.
+
+O acionamento pelo Fail2ban usa configurações próprias em `firewall.py`: ajuste `caminho_base_chaves`, o nome da chave privada (`henrxque`, no exemplo atual) e `NOME_CADEIA` para o seu ambiente. A cadeia deve ser a mesma configurada no orquestrador. A chave pública correspondente deve estar disponível com o sufixo `.pub`.
+
+### Integração com Fail2ban
+
+Crie `/etc/fail2ban/action.d/freechains-ufw.conf` com o conteúdo abaixo, substituindo `/caminho/absoluto/Firewall-Colaborativo` pelo caminho real do projeto:
+
+```ini
+[Definition]
+actionban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py ban <ip> "" "<name>"
+actionunban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py unban <ip>
 ```
-freechains_ufw.conf 
-```
-Na pasta `/etc/fail2ban/action.d/`
 
-Adicione as premissas na linha antes de `Init`
-```
-# O Fail2ban injeta o IP malicioso na tag <ip>
-actionban = /usr/bin/python3 "caminho_deste_projeto_na_sua_máquina" >Firewall-Colaborativo/firewall.py ban <ip> <time> <name>
+O argumento de timestamp é deixado vazio para que `firewall.py` use o horário atual; `<name>` é usado como motivo. Na configuração da jail desejada, inclua a ação `freechains-ufw` junto às ações de banimento que já utiliza. Por exemplo:
 
-# Executado automaticamente quando o tempo de banimento (bantime) expira
-actionunban = /usr/bin/python3 "caminho_deste_projeto_na_sua_máquina" Firewall-Colaborativo/firewall.py unban <ip>
+```ini
+[sshd]
+enabled = true
+action = %(action_)s
+         freechains-ufw
 ```
 
-### Configuração dos Nós
+Depois de configurar, recarregue o Fail2ban e confira o estado da jail:
 
-No cabeçalho do arquivo `orquestracao.py` e em `main.py`, defina as configurações do seu ambiente:
+```bash
+sudo fail2ban-client reload
+sudo fail2ban-client status sshd
+```
 
-* `NOME_CADEIA`: Nome da cadeia Freechains (ex: `#firewall-test` ou `#p2p`).
-
-
-* `ENDERECO_REMOTO`: IP e porta do par que servirá as atualizações (ex: `10.0.1.222:8330`).
-
-
-* `CHAVE_PRIVADA`: Caminho absoluto do arquivo da chave privada para assinatura das operações.
-
-
-* `INTERVALO_SEGUNDOS`: Período de dormência entre ciclos do daemon.
-
-
+Garanta que o processo do Fail2ban consiga localizar o executável `freechains` e acessar o daemon e a chave configurada em `firewall.py`.
 
 ### Execução
 
-1. **Iniciar o Daemon do Orquestrador:**
-Execute a aplicação a partir do diretório raiz onde os scripts estão localizados:
+Inicie o orquestrador a partir da raiz do projeto:
+
 ```bash
 python3 orquestracao.py
-
 ```
 
+Ele executará os ciclos continuamente, aguardando `INTERVALO_SEGUNDOS` entre eles. Encerre com `Ctrl+C`.
 
-O daemon rodará em segundo plano até ser interrompido por sinal de interrupção (`Ctrl+C`).
-
-
-2. **Acionamento Manual ou via Fail2ban (`firewall.py`):**
-Para aplicar um bloqueio pontual no UFW e propagá-lo para a cadeia P2P:
-
+Para bloquear manualmente um IP no UFW e reportá-lo na cadeia, informe o timestamp Unix e o motivo:
 
 ```bash
-python3 firewall.py ban 198.51.100.25 1792345800 "SSH brute force"
-
+python3 firewall.py ban 198.51.100.25 "$(date +%s)" "SSH brute force"
 ```
 
-
-Para remover um bloqueio local no UFW (apenas remove a regra local sem emitir post na cadeia):
-
+Para remover o bloqueio local do UFW:
 
 ```bash
 python3 firewall.py unban 198.51.100.25
-
 ```
 
-
+O comando `unban` remove somente a regra local; ele não publica uma ação de desbloqueio na cadeia.
 
 ---
 
