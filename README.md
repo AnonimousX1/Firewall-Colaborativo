@@ -15,20 +15,10 @@ Permitir que múltiplos nós distribuídos em uma cadeia Freechains publiquem de
 O daemon principal (`orquestracao.py`) opera em loop contínuo executando periodicamente o seguinte ciclo:
 
 1. **Sincronização (`sync recv`):** Atualiza a cadeia local contra o par remoto especificado (ou realiza o clone automático caso a cadeia ainda não exista).
-
-
 2. **Leitura Incremental e Validação:** Analisa apenas novos blocos do tipo `post`. Realiza a validação de formato JSON, checa a integridade e escopo de IPs públicos (rejeitando IPs privados) e valida formatos de timestamp, atualizando os perfis locais em `denuncias.json`.
-
-
 3. **Avaliação Reputacional:** Calcula a taxa de erro ponderada individual de cada autor (`main.avaliar_punicoes`) e emite moderação (`dislike` na mensagem ou na chave pública do autor), respeitando a reputação atual do próprio nó avaliador.
-
-
 4. **Aplicação no Firewall:** Lê as denúncias de colaboradores confiáveis e aciona o comando `sudo ufw prepend deny from <IP>` para regras ainda não aplicadas (`aplicado_ufw == False`).
-
-
 5. **Crivo de Novatos (`list begs`):** Avalia mensagens pendentes na fila de mendicância. Aplica tolerância zero (dislike imediato no autor se houver payload malformado) ou concede `like` integrador caso o novato atinja o desafio mínimo de relatos válidos.
-
-
 
 ```json
 {
@@ -36,6 +26,7 @@ O daemon principal (`orquestracao.py`) opera em loop contínuo executando period
   "motivo": "Fail2ban SSH brute-force",
   "timestamp": "2026-10-18 12:30:00"
 }
+
 
 ```
 
@@ -45,6 +36,8 @@ O daemon principal (`orquestracao.py`) opera em loop contínuo executando period
 
 | Arquivo | Responsabilidade |
 | --- | --- |
+| `configuracao.py` | Arquivo central de configurações do projeto, onde as variáveis globais (chaves, nomes de cadeia, caminhos e intervalos) são definidas para injeção de dependências. |
+| `setup.py` | Script de configuração automatizada que ajusta permissões no arquivo sudoers para o UFW e cria a *action* de integração no diretório do Fail2ban. |
 | `main.py` | Métodos do protocolo Freechains, publicação e busca de relatos, cálculo de taxas de erro, aplicação de moderação e crivo de novatos. |
 | `orquestracao.py` | Daemon em loop contínuo que agenda e executa os ciclos de sincronização, punição e mitigação no firewall. |
 | `firewall.py` | Integração via subprocesso com o UFW (`prepend deny` / `delete deny`) e ponto de entrada para ações disparadas pelo Fail2ban. |
@@ -71,13 +64,13 @@ freechains daemon start --port=8330
 
 ### Configuração do UFW
 
-O código chama `sudo ufw`; para que o daemon e a ação do Fail2ban não fiquem aguardando uma senha, configure uma regra restrita ao binário do UFW. Confira o caminho instalado com `command -v ufw` e use esse caminho na regra:
+O código chama `sudo ufw`; para que o daemon e a ação do Fail2ban não fiquem aguardando uma senha, configure uma regra restrita ao binário do UFW:
 
 ```bash
 sudo visudo -f /etc/sudoers.d/firewall-colaborativo
 ```
 
-Inclua a linha abaixo, substituindo `seu_usuario` e o caminho do UFW conforme o sistema:
+Inclua a linha abaixo, substituindo `seu_usuario` e o caminho do UFW conforme o sistema. Confira o caminho instalado com `command -v ufw` e use esse caminho na regra:
 
 ```sudoers
 seu_usuario ALL=(root) NOPASSWD: /usr/sbin/ufw
@@ -106,6 +99,7 @@ Crie `/etc/fail2ban/action.d/freechains_ufw.conf` com o conteúdo abaixo, substi
 actionban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py ban <ip> <time> <name>
 
 actionunban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py unban <ip>
+
 ```
 
 O argumento de timestamp é deixado vazio para que `firewall.py` use o horário atual; `<name>` é usado como motivo. Na configuração da jail desejada, inclua a ação `freechains_ufw` junto às ações de banimento que já utiliza. Por exemplo:
@@ -115,6 +109,7 @@ O argumento de timestamp é deixado vazio para que `firewall.py` use o horário 
 enabled = true
 action = %(action_)s
          freechains_ufw
+
 ```
 
 Depois de configurar, recarregue o Fail2ban e confira o estado da jail:
@@ -122,6 +117,7 @@ Depois de configurar, recarregue o Fail2ban e confira o estado da jail:
 ```bash
 sudo fail2ban-client reload
 sudo fail2ban-client status sshd
+
 ```
 
 Garanta que o processo do Fail2ban consiga localizar o executável `freechains` e acessar o daemon e a chave configurada em `firewall.py`.
@@ -132,6 +128,7 @@ Inicie o orquestrador a partir da raiz do projeto:
 
 ```bash
 python3 orquestracao.py
+
 ```
 
 Ele executará os ciclos continuamente, aguardando `INTERVALO_SEGUNDOS` entre eles. Encerre com `Ctrl+C`.
@@ -140,12 +137,14 @@ Para bloquear manualmente um IP no UFW e reportá-lo na cadeia, informe o timest
 
 ```bash
 python3 firewall.py ban 198.51.100.25 "$(date +%s)" "SSH brute force"
+
 ```
 
 Para remover o bloqueio local do UFW:
 
 ```bash
 python3 firewall.py unban 198.51.100.25
+
 ```
 
 O comando `unban` remove somente a regra local; ele não publica uma ação de desbloqueio na cadeia.
@@ -155,57 +154,28 @@ O comando `unban` remove somente a regra local; ele não publica uma ação de d
 ## b. O que foi Implementado
 
 * **Operações do substancias do Protocolo Freechains:** Rotinas de automação para clonagem incremental (`chains add clone`), recepção de blocos (`sync recv`), postagens normais e assistidas (`--beg`), likes e dislikes em ações e autores, além de leitura de metadados e inspeção de payloads.
-
-
 * **Processamento Incremental Baseado em Deltas(Na minha cabeça se chama diferenças):** Mecanismo com verificação de conjuntos de hashes (`blocos_ja_vistos`), garantindo que apenas transações novas sejam processadas após a primeira carga, economizando I/O de disco e chamadas de subprocessos.
-
-
 * **Prevenção de Reprocessamento e Punições Repetidas:** Controle de duplicação através das chaves `"aplicado_ufw"` e `"blocos_ja_punidos"` salvas em `denuncias.json`, impedindo duplicações de regras no UFW e evitando gastos de reputação com dislikes redundantes.
-
-
 * **Reputação e Avaliação Ponderada:** Cálculo de taxa de erro individual considerando pesos de severidade (erros de formatação de timestamp, injeção de IPs privados ou payloads não-JSON), classificando autores entre "colaborador" e "infrator". Isso deu bastante trabalho !
-
-
 * **Regras rígidas para entrada de colaboradores (`--beg`):** Rotina de triagem de mendigos que impõe tolerância zero para payloads defeituosos e exige volume mínimo de postagens legítimas para acolhimento de novos nós na cadeia.
-
-
 * **Automação do Firewall Local:** Mecanismo seguro de injeção de regras via `sudo ufw prepend deny`, priorizando bloqueios antes de regras permissivas e tratando códigos de erro para novas tentativas em caso de falha de execução.
-
-
 
 ---
 
 ## c. O que Não foi Implementado
 
 * **Propagação Ativa via `sync send`:** Como a primitiva `send` apresentou problemas no daemon da versão do Freechains utilizada, a disseminação depende exclusivamente de rotinas de coleta (`sync recv`) disparadas por cada par receptor.
-
-
 * **Validação de Veracidade da Ameaça:** A arquitetura valida rigorosamente o formato sintático (se é um IP público e se os campos existem), mas não possui mecanismo de desafio para atestar se o IP bloqueado representava, de fato, um ataque real.
-
-
 * **Sistema Centralizado ou Rotativo de Logs em Disco:** As saídas e diagnósticos operam através de saidas no terminal do console do daemon, sem nenhum tipo de saida por arquivo. Que facilita a extração de logs quando executado por vários dias.
-
 * **Mecanismo de Desbloqueio Dinâmico Distribuído:** A aplicação propaga banimentos na rede, mas não há consenso implementado para "perdão" ou expiração coordenada de IPs entre os pares (o desbloqueio "unban" precisa ser realizada localmente pelo por quem utiliza o projeto).
-
-
 * **Bloqueio no UFW dos Próprios Pares Infratores:** O nó pune a chave pública do autor na camada do Freechains (via reputação), mas não bloqueia a comunicação de rede ou o IP de transporte do nó infrator no firewall local, que seria mais eficiente.
-
-
 
 ---
 
 ## d. Ferramentas Utilizadas
 
 * **Freechains (v0.20):** Protocolo P2P baseado em árvores Git para consenso por reputação e publicação/assinatura descentralizada.
-
-
 * **Python (3.10+):** Linguagem base para desenvolvimento de toda a camada lógica, parsing e automação, sem uso de bibliotecas de terceiros.
-
-
 * **UFW (Uncomplicated Firewall):** Interface de manipulação de regras de filtragem de pacotes do kernel Linux.
-
-
 * **Fail2ban:** Agente de detecção de intrusão baseado em logs utilizado para disparar gatilhos de banimento integrados ao ecossistema.
-
-
 * **JSON:** Formato estruturado para payloads de rede nas transações Freechains e para persistência de estado local incremental no nó.
