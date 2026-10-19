@@ -48,7 +48,7 @@ def executar_ciclo_orquestracao(
     # ETAPA 2: Avalia os perfis e aplica dislikes (action ou author) em novas infrações
     main.avaliar_punicoes(caminho_arquivo_json, nome_cadeia, chave_privada)
 
-    # ETAPA 3: Lê as denúncias inéditas de colaboradores confiáveis e aplica no UFW local
+    # ETAPA 3: Lê as denúncias novas de colaboradores confiáveis e aplica no UFW local
     main.aplicar_bloqueios_cadeia_publica(caminho_arquivo_json)
 
     # # ETAPA 4: A avaliação de denuncias na “begs” da cadeia.
