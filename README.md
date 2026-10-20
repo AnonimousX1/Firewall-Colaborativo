@@ -18,7 +18,7 @@ O daemon principal (`orquestracao.py`) opera em loop contínuo executando period
 2. **Leitura Incremental e Validação:** Analisa apenas novos blocos do tipo `post`. Realiza a validação de formato JSON, checa a integridade e escopo de IPs públicos (rejeitando IPs privados) e valida formatos de timestamp, atualizando os perfis locais em `denuncias.json`.
 3. **Avaliação Reputacional:** Calcula a taxa de erro ponderada individual de cada autor (`main.avaliar_punicoes`) e emite moderação (`dislike` na mensagem ou na chave pública do autor), respeitando a reputação atual do próprio nó avaliador.
 4. **Aplicação no Firewall:** Lê as denúncias de colaboradores confiáveis e aciona o comando `sudo ufw prepend deny from <IP>` para regras ainda não aplicadas (`aplicado_ufw == False`).
-5. **Crivo de Novatos (`list begs`):** Avalia mensagens pendentes na fila de mendicância. Aplica tolerância zero (dislike imediato no autor se houver payload malformado) ou concede `like` integrador caso o novato atinja o desafio mínimo de relatos válidos.
+5. **Crivo de Novatos (`list begs`):** Avalia mensagens pendentes na fila de mendicância. Um beg inválido aplica dislike ao autor e o desqualifica permanentemente do desafio; begs válidos posteriores não revertem essa decisão. Likes só são concedidos a autores que atinjam o mínimo de relatos válidos sem terem sido desqualificados.
 
 ```json
 {
@@ -26,8 +26,6 @@ O daemon principal (`orquestracao.py`) opera em loop contínuo executando period
   "motivo": "Fail2ban SSH brute-force",
   "timestamp": "2026-10-18 12:30:00"
 }
-
-
 ```
 
 ---
@@ -62,20 +60,6 @@ Inicie o daemon do Freechains antes de executar o projeto. Ajuste a porta confor
 freechains daemon start --port=8330
 ```
 
-### Configuração do UFW
-
-O código chama `sudo ufw`; para que o daemon e a ação do Fail2ban não fiquem aguardando uma senha, configure uma regra restrita ao binário do UFW:
-
-```bash
-sudo visudo -f /etc/sudoers.d/firewall-colaborativo
-```
-
-Inclua a linha abaixo, substituindo `seu_usuario` e o caminho do UFW conforme o sistema. Confira o caminho instalado com `command -v ufw` e use esse caminho na regra:
-
-```sudoers
-seu_usuario ALL=(root) NOPASSWD: /usr/sbin/ufw
-```
-
 ### Configuração dos nós
 
 Edite o bloco de configurações no final de `configuracao.py`:
@@ -86,41 +70,50 @@ Edite o bloco de configurações no final de `configuracao.py`:
 * `INTERVALO_SEGUNDOS`: intervalo entre ciclos; o padrão atual é `60` segundos.
 * `ARQUIVO_DENUNCIAS`: mantenha `Path("denuncias.json")`. O processamento em `main.py` também usa esse nome relativo ao diretório atual.
 
-Execute os scripts a partir da raiz do repositório para que o arquivo `denuncias.json` seja encontrado no local esperado.
+Execute os scripts a partir da raiz do repositório para que o arquivo `denuncias.json` seja encontrado no local esperado. A chave pública correspondente deve estar disponível com o sufixo `.pub`.
 
-O acionamento pelo Fail2ban usa configurações próprias em `firewall.py`: ajuste `CAMINHO_BASE_CHAVES`, o nome da chave privada (`henrxque`, no exemplo atual) e `NOME_CADEIA` para o seu ambiente. A cadeia deve ser a mesma configurada no orquestrador. A chave pública correspondente deve estar disponível com o sufixo `.pub`.
+### Configuração Automatizada do Ambiente (UFW e Fail2ban)
 
-### Integração com Fail2ban
+Para que o orquestrador consiga manipular o firewall e para que o Fail2ban consiga acionar o nosso projeto, execute o script de instalação automatizada na raiz do repositório:
 
-Crie `/etc/fail2ban/action.d/freechains_ufw.conf` com o conteúdo abaixo, substituindo `/caminho/absoluto/Firewall-Colaborativo` pelo caminho real do projeto:
-
-```ini
-[Definition]
-actionban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py ban <ip> <time> <name>
-
-actionunban = /usr/bin/python3 /caminho/absoluto/Firewall-Colaborativo/firewall.py unban <ip>
-
+```bash
+sudo python3 setup.py
 ```
 
-O argumento de timestamp é deixado vazio para que `firewall.py` use o horário atual; `<name>` é usado como motivo. Na configuração da jail desejada, inclua a ação `freechains_ufw` junto às ações de banimento que já utiliza. Por exemplo:
+*(Nota: O script deve ser executado com `sudo` a partir do seu usuário comum do sistema, pois ele detecta o seu usuário para liberar as permissões exatas no UFW e criar as actions do Fail2ban).*
+
+Retorno apos rotinas de `setup.py` funcionarem corretamente:
+
+``` bash
+freechains@freechains:~/Firewall-Colaborativo$ sudo python3 setup.py
+Iniciando configuração automatizada...
+ -> Usuário detectado: freechains
+ -> Caminho do script: /home/freechains/Firewall-Colaborativo/firewall.py
+ -> [OK] Regra do UFW adicionada ao sudoers.
+ -> [OK] Action do Fail2ban (freechains_ufw.conf) criada.
+ -> [OK] Serviço Fail2ban recarregado.
+
+Configuração concluída com sucesso!
+```
+
+Após a execução com sucesso do script, basta habilitar a ação recém-criada na cadeia (jail) do Fail2ban que você deseja proteger.
+Cadeias do Fail2ban ficam localizadas em `/etc/fail2ban/jail.local`.
+
+Exemplo para habilitar testes de brute-force de SSH, no seu arquivo de configuração do Fail2ban:
 
 ```ini
 [sshd]
 enabled = true
 action = %(action_)s
          freechains_ufw
-
 ```
 
-Depois de configurar, recarregue o Fail2ban e confira o estado da jail:
+Depois de adicionar a ação na jail, confira o status:
 
 ```bash
 sudo fail2ban-client reload
 sudo fail2ban-client status sshd
-
 ```
-
-Garanta que o processo do Fail2ban consiga localizar o executável `freechains` e acessar o daemon e a chave configurada em `firewall.py`.
 
 ### Execução
 
@@ -128,7 +121,6 @@ Inicie o orquestrador a partir da raiz do projeto:
 
 ```bash
 python3 orquestracao.py
-
 ```
 
 Ele executará os ciclos continuamente, aguardando `INTERVALO_SEGUNDOS` entre eles. Encerre com `Ctrl+C`.
@@ -137,14 +129,12 @@ Para bloquear manualmente um IP no UFW e reportá-lo na cadeia, informe o timest
 
 ```bash
 python3 firewall.py ban 198.51.100.25 "$(date +%s)" "SSH brute force"
-
 ```
 
 Para remover o bloqueio local do UFW:
 
 ```bash
 python3 firewall.py unban 198.51.100.25
-
 ```
 
 O comando `unban` remove somente a regra local; ele não publica uma ação de desbloqueio na cadeia.
@@ -157,7 +147,7 @@ O comando `unban` remove somente a regra local; ele não publica uma ação de d
 * **Processamento Incremental Baseado em Deltas(Na minha cabeça se chama diferenças):** Mecanismo com verificação de conjuntos de hashes (`blocos_ja_vistos`), garantindo que apenas transações novas sejam processadas após a primeira carga, economizando I/O de disco e chamadas de subprocessos.
 * **Prevenção de Reprocessamento e Punições Repetidas:** Controle de duplicação através das chaves `"aplicado_ufw"` e `"blocos_ja_punidos"` salvas em `denuncias.json`, impedindo duplicações de regras no UFW e evitando gastos de reputação com dislikes redundantes.
 * **Reputação e Avaliação Ponderada:** Cálculo de taxa de erro individual considerando pesos de severidade (erros de formatação de timestamp, injeção de IPs privados ou payloads não-JSON), classificando autores entre "colaborador" e "infrator". Isso deu bastante trabalho !
-* **Regras rígidas para entrada de colaboradores (`--beg`):** Rotina de triagem de mendigos que impõe tolerância zero para payloads defeituosos e exige volume mínimo de postagens legítimas para acolhimento de novos nós na cadeia.
+* **Regras rígidas para entrada de colaboradores (`--beg`):** Rotina de triagem de mendigos que desqualifica o autor após qualquer payload defeituoso e exige volume mínimo de postagens legítimas para acolhimento de novos nós na cadeia.
 * **Automação do Firewall Local:** Mecanismo seguro de injeção de regras via `sudo ufw prepend deny`, priorizando bloqueios antes de regras permissivas e tratando códigos de erro para novas tentativas em caso de falha de execução.
 
 ---
@@ -178,4 +168,4 @@ O comando `unban` remove somente a regra local; ele não publica uma ação de d
 * **Python (3.10+):** Linguagem base para desenvolvimento de toda a camada lógica, parsing e automação, sem uso de bibliotecas de terceiros.
 * **UFW (Uncomplicated Firewall):** Interface de manipulação de regras de filtragem de pacotes do kernel Linux.
 * **Fail2ban:** Agente de detecção de intrusão baseado em logs utilizado para disparar gatilhos de banimento integrados ao ecossistema.
-* **JSON:** Formato estruturado para payloads de rede nas transações Freechains e para persistência de estado local incremental no nó.
+* **JSON:** Formato estruturado para payloads de rede nas transações Freechains e para persistência do estado no nó.

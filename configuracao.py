@@ -6,6 +6,9 @@ ENDERECO_REMOTO: str = "10.0.1.222:8330"
 ARQUIVO_DENUNCIAS: str = "denuncias.json"
 CHAVE_PRIVADA: str = "/home/kali/henrxque"
 
+RECOMPENSA_LIKE: int = 10
+MIN_REPORTS_DESAFIO: int = 3
+
 # - Intervalo de refresh
 # Tempo entre cada sincronização (em segundos)
 # Para testes rápidos no laboratório, use 15 ou 30 segundos.

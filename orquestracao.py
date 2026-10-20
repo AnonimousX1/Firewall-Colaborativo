@@ -27,7 +27,9 @@ def executar_ciclo_orquestracao(
     nome_cadeia: str,
     endereco_remoto: str,
     caminho_arquivo_json: Path,
-    chave_privada: Path
+    chave_privada: Path,
+    recompensa_like: int,
+    min_reports_desafio: int
 ) -> None:
     """
     Executa as 3 etapas fundamentais do sistema na ordem correta.
@@ -52,7 +54,7 @@ def executar_ciclo_orquestracao(
     main.aplicar_bloqueios_cadeia_publica(caminho_arquivo_json)
 
     # # ETAPA 4: A avaliação de denuncias na “begs” da cadeia.
-    main.avaliar_mendigos(caminho_arquivo_json, nome_cadeia, chave_privada, recompensa_like = 10, min_reports_desafio = 50)
+    main.avaliar_mendigos(caminho_arquivo_json, nome_cadeia, chave_privada, recompensa_like, min_reports_desafio)
 
     # ETAPA 5: Propaga para a rede eventuais dislikes/posts que nosso nó gerou neste ciclo
     # Não funciona
@@ -66,7 +68,9 @@ def iniciar_daemon(
     endereco_remoto: str,
     caminho_arquivo_json: Path,
     chave_privada: Path,
-    intervalo_segundos: int = 60
+    recompensa_like: int,
+    min_reports_desafio: int,
+    intervalo_segundos: int = 60,
 ) -> None:
     """
     Mantém o orquestrador rodando continuamente em background/terminal.
@@ -82,7 +86,9 @@ def iniciar_daemon(
                     nome_cadeia=nome_cadeia,
                     endereco_remoto=endereco_remoto,
                     caminho_arquivo_json=caminho_arquivo_json,
-                    chave_privada=chave_privada
+                    chave_privada=chave_privada,
+                    recompensa_like=recompensa_like,
+                    min_reports_desafio=min_reports_desafio
                 )
             except Exception as erro_ciclo:
                 # Se der um erro inesperado num ciclo (ex: falha momentânea de rede),
@@ -109,5 +115,7 @@ if __name__ == "__main__":
         endereco_remoto= configuracao.ENDERECO_REMOTO,
         caminho_arquivo_json=ARQUIVO_DENUNCIAS_PATH,
         chave_privada=CHAVE_PRIVADA_PATH,
-        intervalo_segundos=configuracao.INTERVALO_SEGUNDOS
+        intervalo_segundos=configuracao.INTERVALO_SEGUNDOS,
+        recompensa_like=configuracao.RECOMPENSA_LIKE,
+        min_reports_desafio=configuracao.MIN_REPORTS_DESAFIO
     )

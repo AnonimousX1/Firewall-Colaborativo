@@ -73,6 +73,8 @@ def sincronizar_cadeia(nome_cadeia: str, endereco_remoto: str) -> str | None:
 
 def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_privada: Path, chave_publica: str = "", modo: str = "action", motivo: str = "") -> bool:
     import os
+    
+    caminho_pub_temp: Path | None = None
 
     if modo == "action":
         comando = [
@@ -107,6 +109,8 @@ def like_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_likes: int, chave_pr
 
 def dislike_mensagem(nome_cadeia: str, hash_mensagem: str, qtd_dislikes: int, chave_privada: Path, chave_publica: str = "", modo: str = "action", motivo: str = "") -> bool:
     import os
+
+    caminho_pub_temp: Path | None = None
 
     if modo == "action":
         comando = [
@@ -313,6 +317,11 @@ def consultar_cadeia_publica(caminho_arquivo: Path, nome_cadeia: str, endereco_r
     comando_listar = ["freechains", "chain", nome_cadeia, "list", "order"]
     resultado_lista = subprocess.run(comando_listar, capture_output=True, text=True)
 
+    if resultado_lista.returncode != 0:
+        erro = resultado_lista.stderr.strip() or resultado_lista.stdout.strip()
+        print(f"Erro ao listar blocos locais da cadeia: {erro or 'falha sem detalhes'}")
+        return
+
     peso_1, peso_2, peso_3 = 1, 2, 5
     novos_blocos_processados = 0
     
@@ -354,11 +363,14 @@ def consultar_cadeia_publica(caminho_arquivo: Path, nome_cadeia: str, endereco_r
         
         try:
             dados_denuncia = json.loads(payload_texto)
+            if not isinstance(dados_denuncia, dict):
+                raise ValueError("payload JSON válido, mas não é um objeto")
+
             ip_malicioso = dados_denuncia.get("ip_malicioso")
             motivo = dados_denuncia.get("motivo", "Desconhecido")
             timestamp = dados_denuncia.get("timestamp", "Desconhecido")
 
-            if not utils.verifica_formato_ip(ip_malicioso):
+            if not isinstance(ip_malicioso, str) or not utils.verifica_formato_ip(ip_malicioso):
                 perfis[autor_pubkey]["contagem_punitiva"] += 1 * peso_3
                 perfis[autor_pubkey]["blocos_invalidos"].append(hash_bloco)
             elif utils.verificar_ip_privado(ip_malicioso):
@@ -376,8 +388,8 @@ def consultar_cadeia_publica(caminho_arquivo: Path, nome_cadeia: str, endereco_r
                     "aplicado_ufw": False  # Flag para saber se já foi pro UFW!
                 })
 
-        except json.JSONDecodeError:
-            print(f"Bloco novo {hash_bloco[:15]} com formato inválido...")
+        except ValueError as erro_json:
+            print(f"Bloco novo {hash_bloco[:15]} com formato inválido: {erro_json}")
             perfis[autor_pubkey]["contagem_punitiva"] += 1
             perfis[autor_pubkey]["blocos_invalidos"].append(hash_bloco)
 
@@ -397,24 +409,14 @@ def consultar_cadeia_publica(caminho_arquivo: Path, nome_cadeia: str, endereco_r
         
     print(f"Consulta concluída! {novos_blocos_processados} novo(s) post(s) analisado(s).")
 
-def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Path, recompensa_like: int = 10, min_reports_desafio: int = 50) -> None:
-    """
-    Regras do Crivo de Mendigos (--beg) com persistência em denuncias.json:
-    1. Tolerância ZERO: Se errar qualquer beg (JSON malformado ou IP inválido/privado),
-       aplica punicao_2 (dislike no autor) e registra o hash em 'begs_reprovados' no disco.
-    2. Idempotência: Begs já reprovados são pulados para evitar queima contínua de reps.
-    3. Desafio: Apenas mendigos com min_reports_desafio válidos recebem like.
-    """
+def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Path, recompensa_like: int, min_reports_desafio: int) -> None:
     import utils
+    import json
+    import subprocess
 
     print("\n--- Avaliando fila de mendigos (--beg) ---")
 
-    reputacao: int = consultar_reputacao(nome_cadeia, chave_privada)
-    if reputacao < recompensa_like * 2:
-        print(f" -> Reputação atual ({reputacao}) insuficiente para avaliar novatos.")
-        return
-
-    # 1. Carrega o estado persistente do denuncias.json
+    # 1. Carrega o estado persistente do denuncias.json (Removido o bloqueio prévio de reputação)
     if caminho_arquivo.exists():
         with open(caminho_arquivo, "r", encoding="utf-8") as f:
             perfis: dict[str, dict] = json.load(f)
@@ -423,6 +425,11 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
 
     cmd_begs = ["freechains", "chain", nome_cadeia, "list", "begs"]
     resultado_begs = subprocess.run(cmd_begs, capture_output=True, text=True)
+
+    # CORREÇÃO P2: Falha ao listar begs não é mais mascarada como fila vazia
+    if resultado_begs.returncode != 0:
+        print(f" -> Erro ao consultar fila de mendigos: {resultado_begs.stderr.strip()}")
+        return
 
     candidatos: dict[str, dict] = {}
     modificou_json: bool = False
@@ -436,7 +443,6 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
         if autor_mendigo == "Desconhecido":
             continue
 
-        # Inicializa o perfil do mendigo no dicionário de perfis caso ainda não exista
         if autor_mendigo not in perfis:
             perfis[autor_mendigo] = {
                 "chave_publica": autor_mendigo,
@@ -446,13 +452,22 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
                 "blocos_invalidos": [],
                 "blocos_ja_punidos": [],
                 "denuncias_validas": [],
-                "begs_reprovados": []
+                "begs_reprovados": [],
+                "begs_likes_enviados": [],
+                "status_desafio": "pendente"
             }
 
-        reprovados_persistidos = perfis[autor_mendigo].setdefault("begs_reprovados", [])
+        reprovados_persistidos: dict[str, dict] = perfis[autor_mendigo].setdefault("begs_reprovados", [])
+        likes_enviados: dict[str, dict] = perfis[autor_mendigo].setdefault("begs_likes_enviados", [])
 
-        # Se este beg já foi reprovado e punido em ciclos anteriores, pula direto!
-        if hash_beg in reprovados_persistidos:
+        if reprovados_persistidos and perfis[autor_mendigo].get("status_desafio") != "reprovado":
+            perfis[autor_mendigo]["status_desafio"] = "reprovado"
+            modificou_json = True
+
+        if perfis[autor_mendigo].get("status_desafio") == "reprovado" and reprovados_persistidos:
+            continue
+
+        if hash_beg in reprovados_persistidos or hash_beg in likes_enviados:
             continue
 
         if autor_mendigo not in candidatos:
@@ -461,7 +476,6 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
                 "bloco_erro": None
             }
 
-        # Se o mendigo já falhou em outro bloco nesta rodada, não processa o restante dele
         if candidatos[autor_mendigo]["bloco_erro"] is not None:
             continue
 
@@ -470,12 +484,19 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
         if resultado_payload.returncode != 0:
             continue
 
+        # CORREÇÃO P1: Tratamento rigoroso de Payload e fuga de atributo
         try:
             dados = json.loads(resultado_payload.stdout.strip())
+            
+            if not isinstance(dados, dict):
+                raise ValueError("Payload JSON válido, mas não é um objeto (dict)")
+            
             ip_malicioso = dados.get("ip_malicioso")
             timestamp = dados.get("timestamp", "")
 
             if (
+                isinstance(ip_malicioso, str)
+                and
                 utils.verifica_formato_ip(ip_malicioso) 
                 and not utils.verificar_ip_privado(ip_malicioso) 
                 and utils.verifica_formato_timestamp(timestamp)
@@ -485,12 +506,15 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
                 print(f" -> Beg {hash_beg[:10]} de {autor_mendigo[:20]}... reprovado (IP/Timestamp fora do padrão)!")
                 candidatos[autor_mendigo]["bloco_erro"] = hash_beg
 
-        except json.JSONDecodeError:
-            print(f" -> Beg {hash_beg[:10]} de {autor_mendigo[:20]}... reprovado (JSON inválido)!")
+        except (json.JSONDecodeError, ValueError, AttributeError) as erro_json:
+            print(f" -> Beg {hash_beg[:10]} de {autor_mendigo[:20]}... reprovado ({erro_json})!")
             candidatos[autor_mendigo]["bloco_erro"] = hash_beg
 
     if not candidatos:
         print(" -> Nenhum novo mendigo pendente de avaliação.")
+        if modificou_json:
+            with open(caminho_arquivo, "w", encoding="utf-8") as f:
+                json.dump(perfis, f, indent=4, ensure_ascii=False)
         return
 
     # 2. Avaliação dos candidatos encontrados
@@ -499,43 +523,93 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
         lista_validos = status["begs_validos"]
         qtd_validos = len(lista_validos)
 
-        # REGRA 1: Tolerância Zero -> Punição imediata e gravação no histórico persistente
-        if bloco_erro is not None:
-            print(f" -> [TOLERÂNCIA ZERO] Mendigo {autor_mendigo[:20]}... cometeu erro! Aplicando punicao_2.")
-            sucesso = punicao_2(
-                bloco=bloco_erro,
-                nome_cadeia=nome_cadeia,
-                chave_privada=chave_privada,
-                chave_publica=autor_mendigo,
-                qtd_dislikes=recompensa_like,
-                motivo="Mendigo malicioso. Erro no periodo probatorio."
-            )
-            if sucesso:
-                perfis[autor_mendigo]["begs_reprovados"].append(bloco_erro)
-                perfis[autor_mendigo]["tipo_perfil"] = "infrator"
-                modificou_json = True
+        ja_aprovado: bool
+        ja_reprovado: bool
 
-        # REGRA 2: Atingiu o desafio de 50 denúncias legítimas
-        elif qtd_validos >= min_reports_desafio:
-            print(f" -> [APROVADO] Mendigo {autor_mendigo[:20]}... completou o desafio ({qtd_validos}/{min_reports_desafio} válidos)!")
+        if perfis[autor_mendigo].get("status_desafio") == "aprovado":
+            ja_aprovado = True
+        else:
+            ja_aprovado = False
+            
+        if perfis[autor_mendigo].get("status_desafio") == "reprovado":
+            ja_reprovado = True
+        else:
+            ja_reprovado = False
+
+        # REGRA 1: Tolerância Zero -> Punição Local e (se possível) na Rede
+        if bloco_erro is not None:
+            print(f" -> [TOLERÂNCIA ZERO] Mendigo {autor_mendigo[:20]}... cometeu erro no beg {bloco_erro[:10]}!")
+            perfis[autor_mendigo]["status_desafio"] = "reprovado"
+            modificou_json = True
+
+            reputacao_atual = consultar_reputacao(nome_cadeia, chave_privada)
+            if reputacao_atual >= recompensa_like:
+                sucesso = punicao_2(
+                    bloco=bloco_erro,
+                    nome_cadeia=nome_cadeia,
+                    chave_privada=chave_privada,
+                    chave_publica=autor_mendigo,
+                    qtd_dislikes=recompensa_like,
+                    motivo="Mendigo malicioso. Erro no periodo probatorio."
+                )
+                if sucesso:
+                    perfis[autor_mendigo]["begs_reprovados"].append(bloco_erro)
+                    perfis[autor_mendigo]["tipo_perfil"] = "infrator"
+                    modificou_json = True
+            else:
+                print(f" -> Reputação insuficiente ({reputacao_atual}) para aplicar dislike na rede. Infrator desqualificado apenas no estado local.")
+
+        elif ja_reprovado:
+            print(f" -> [DESQUALIFICADO] Mendigo {autor_mendigo[:20]}... já errou no desafio. Likes não serão concedidos.")
+
+        # REGRA 2: Atingiu o desafio de reports legítimos
+        elif qtd_validos >= min_reports_desafio or ja_aprovado:
+            
+            if not ja_aprovado:
+                print(f" -> [APROVADO] Mendigo {autor_mendigo[:20]}... completou o desafio ({qtd_validos}/{min_reports_desafio} válidos)!")
+                perfis[autor_mendigo]["status_desafio"] = "aprovado"
+                modificou_json = True
+            else:
+                print(f" -> [RETOMANDO] Mendigo {autor_mendigo[:20]}... já aprovado. Retomando likes pendentes ({qtd_validos} válidos).")
+
             for hash_valido in lista_validos:
-                like_mensagem(
+                reputacao = consultar_reputacao(nome_cadeia, chave_privada)
+                if reputacao < recompensa_like:
+                    print(f" -> Reputação atual ({reputacao}) insuficiente para iniciar a transação do like ({recompensa_like}).")
+                    if modificou_json:
+                        with open(caminho_arquivo, "w", encoding="utf-8") as f:
+                            json.dump(perfis, f, indent=4, ensure_ascii=False)
+                    return
+
+                sucesso_like = like_mensagem(
                     nome_cadeia=nome_cadeia,
                     hash_mensagem=hash_valido,
                     qtd_likes=recompensa_like,
                     chave_privada=chave_privada,
                     modo="action",
-                    motivo="Desafio de 50 reports concluido com sucesso"
+                    motivo=f"Desafio de {min_reports_desafio} reports concluido com sucesso"
                 )
+                
+                if not sucesso_like:
+                    reputacao_apos_falha = consultar_reputacao(nome_cadeia, chave_privada)
+                    print(f" -> Freechains recusou o like. Reputação consultada após a falha: {reputacao_apos_falha}. A tentativa será retomada no próximo ciclo.")
+                    if modificou_json:
+                        with open(caminho_arquivo, "w", encoding="utf-8") as f:
+                            json.dump(perfis, f, indent=4, ensure_ascii=False)
+                    return
+
+                likes_enviados.append(hash_valido)
+                modificou_json = True
 
         # REGRA 3: Em progresso do desafio
         else:
             print(f" -> [EM DESAFIO] Mendigo {autor_mendigo[:20]}... possui {qtd_validos}/{min_reports_desafio} reports legítimos. Aguardando a meta.")
 
-    # 3. Persiste no arquivo se houveram novas punições
+    # 3. Persiste no arquivo se houveram modificações concluídas com sucesso
     if modificou_json:
         with open(caminho_arquivo, "w", encoding="utf-8") as f:
             json.dump(perfis, f, indent=4, ensure_ascii=False)
+            
 
 def avaliar_punicoes(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Path) -> None:
     print("\n--- Relatório de Avaliação de Infratores---")

@@ -7,6 +7,7 @@ from pathlib import Path
 
 def executar_setup():
     import configuracao
+    falha_configuracao = False
     # 1. Verifica se está rodando como root
     if os.geteuid() != 0:
         print("Erro: Este script precisa ser executado como root.")
@@ -41,6 +42,7 @@ def executar_setup():
         caminho_sudoers.chmod(0o440)  # O sudo exige essa permissão estrita
         print(" -> [OK] Regra do UFW adicionada ao sudoers.")
     except Exception as e:
+        falha_configuracao = True
         print(f" -> [ERRO] Falha ao configurar sudoers: {e}")
 
     # 5. Criar a Action do Fail2ban
@@ -72,12 +74,21 @@ actionunban = sudo -u {usuario} /usr/bin/python3 {caminho_firewall} unban <ip>
             print(" -> [OK] Action do Fail2ban (freechains_ufw.conf) criada.")
             
             # Tenta recarregar o Fail2ban para aplicar as mudanças
-            subprocess.run(["fail2ban-client", "reload"], capture_output=True)
-            print(" -> [OK] Serviço Fail2ban recarregado.")
+            resultado_reload = subprocess.run(["fail2ban-client", "reload"], capture_output=True, text=True)
+            if resultado_reload.returncode == 0:
+                print(" -> [OK] Serviço Fail2ban recarregado.")
+            else:
+                falha_configuracao = True
+                erro_reload = resultado_reload.stderr.strip() or resultado_reload.stdout.strip()
+                print(f" -> [ERRO] Falha ao recarregar o Fail2ban: {erro_reload or 'falha sem detalhes'}")
         except Exception as e:
+            falha_configuracao = True
             print(f" -> [ERRO] Falha ao configurar Fail2ban: {e}")
 
-    print("\nConfiguração concluída com sucesso!")
+    if falha_configuracao:
+        print("\nConfiguração concluída com erros. Revise as mensagens acima.")
+    else:
+        print("\nConfiguração concluída com sucesso!")
 
 if __name__ == "__main__":
     executar_setup()
