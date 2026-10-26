@@ -4,10 +4,11 @@
 NOME_CADEIA: str = "#firewall-test"
 ENDERECO_REMOTO: str = "10.0.1.222:8330"
 ARQUIVO_DENUNCIAS: str = "denuncias.json"
-CHAVE_PRIVADA: str = "/home/kali/henrxque"
+CHAVE_PRIVADA: str = "/home/kali/malicioso2"
 
 RECOMPENSA_LIKE: int = 10
-MIN_REPORTS_DESAFIO: int = 3
+RECOMPENSA_ENTRADA: int = 500
+MIN_REPORTS_DESAFIO: int = 2
 
 # - Intervalo de refresh
 # Tempo entre cada sincronização (em segundos)

@@ -494,20 +494,31 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
             ip_malicioso = dados.get("ip_malicioso")
             timestamp = dados.get("timestamp", "")
 
+            validar_formato_ip: bool = utils.verifica_formato_ip(ip_malicioso) 
+            valida_privado: bool= utils.verificar_ip_privado(ip_malicioso) 
+            validar_formato_time: bool = utils.verifica_formato_timestamp(timestamp)
+
             if (
                 isinstance(ip_malicioso, str)
                 and
-                utils.verifica_formato_ip(ip_malicioso) 
-                and not utils.verificar_ip_privado(ip_malicioso) 
-                and utils.verifica_formato_timestamp(timestamp)
+                validar_formato_ip
+                and not valida_privado
+                and validar_formato_time
             ):
                 candidatos[autor_mendigo]["begs_validos"].append(hash_beg)
             else:
-                print(f" -> Beg {hash_beg[:10]} de {autor_mendigo[:20]}... reprovado (IP/Timestamp fora do padrão)!")
+                if(not validar_formato_ip):
+                    print(f" -> Beg {hash_beg[:15]} de {autor_mendigo[:25]}... reprovado (IP fora do padrão)!")
+                if(valida_privado):
+                    print(f" -> Beg {hash_beg[:15]} de {autor_mendigo[:25]}... reprovado (IP privado)!")
+                if(not validar_formato_time):
+                    print(f" -> Beg {hash_beg[:15]} de {autor_mendigo[:25]}... reprovado (Timestamp fora do padrão)!")
+                
+                #print(f" -> Beg {hash_beg[:15]} de {autor_mendigo[:25]}... reprovado (IP/Timestamp fora do padrão)!")
                 candidatos[autor_mendigo]["bloco_erro"] = hash_beg
 
         except (json.JSONDecodeError, ValueError, AttributeError) as erro_json:
-            print(f" -> Beg {hash_beg[:10]} de {autor_mendigo[:20]}... reprovado ({erro_json})!")
+            print(f" -> Beg {hash_beg[:15]} de {autor_mendigo[:25]}... reprovado ({erro_json})!")
             candidatos[autor_mendigo]["bloco_erro"] = hash_beg
 
     if not candidatos:
@@ -538,7 +549,7 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
 
         # REGRA 1: Tolerância Zero -> Punição Local e (se possível) na Rede
         if bloco_erro is not None:
-            print(f" -> [TOLERÂNCIA ZERO] Mendigo {autor_mendigo[:20]}... cometeu erro no beg {bloco_erro[:10]}!")
+            print(f" -> [TOLERÂNCIA ZERO] Mendigo {autor_mendigo[:25]}... cometeu erro no beg {bloco_erro[:10]}!")
             perfis[autor_mendigo]["status_desafio"] = "reprovado"
             modificou_json = True
 
@@ -560,17 +571,17 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
                 print(f" -> Reputação insuficiente ({reputacao_atual}) para aplicar dislike na rede. Infrator desqualificado apenas no estado local.")
 
         elif ja_reprovado:
-            print(f" -> [DESQUALIFICADO] Mendigo {autor_mendigo[:20]}... já errou no desafio. Likes não serão concedidos.")
+            print(f" -> [DESQUALIFICADO] Mendigo {autor_mendigo[:25]}... já errou no desafio. Likes não serão concedidos.")
 
         # REGRA 2: Atingiu o desafio de reports legítimos
         elif qtd_validos >= min_reports_desafio or ja_aprovado:
             
             if not ja_aprovado:
-                print(f" -> [APROVADO] Mendigo {autor_mendigo[:20]}... completou o desafio ({qtd_validos}/{min_reports_desafio} válidos)!")
+                print(f" -> [APROVADO] Mendigo {autor_mendigo[:25]}... completou o desafio ({qtd_validos}/{min_reports_desafio} válidos)!")
                 perfis[autor_mendigo]["status_desafio"] = "aprovado"
                 modificou_json = True
             else:
-                print(f" -> [RETOMANDO] Mendigo {autor_mendigo[:20]}... já aprovado. Retomando likes pendentes ({qtd_validos} válidos).")
+                print(f" -> [RETOMANDO] Mendigo {autor_mendigo[:25]}... já aprovado. Retomando likes pendentes ({qtd_validos} válidos).")
 
             for hash_valido in lista_validos:
                 reputacao = consultar_reputacao(nome_cadeia, chave_privada)
@@ -586,6 +597,7 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
                     hash_mensagem=hash_valido,
                     qtd_likes=recompensa_like,
                     chave_privada=chave_privada,
+                    chave_publica=autor_mendigo,
                     modo="action",
                     motivo=f"Desafio de {min_reports_desafio} reports concluido com sucesso"
                 )
@@ -603,7 +615,7 @@ def avaliar_mendigos(caminho_arquivo: Path, nome_cadeia: str, chave_privada: Pat
 
         # REGRA 3: Em progresso do desafio
         else:
-            print(f" -> [EM DESAFIO] Mendigo {autor_mendigo[:20]}... possui {qtd_validos}/{min_reports_desafio} reports legítimos. Aguardando a meta.")
+            print(f" -> [EM DESAFIO] Mendigo {autor_mendigo[:25]}... possui {qtd_validos}/{min_reports_desafio} reports legítimos. Aguardando a meta.")
 
     # 3. Persiste no arquivo se houveram modificações concluídas com sucesso
     if modificou_json:

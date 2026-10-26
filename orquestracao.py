@@ -29,6 +29,7 @@ def executar_ciclo_orquestracao(
     caminho_arquivo_json: Path,
     chave_privada: Path,
     recompensa_like: int,
+    recompensa_entrada: int,
     min_reports_desafio: int
 ) -> None:
     """
@@ -54,7 +55,7 @@ def executar_ciclo_orquestracao(
     main.aplicar_bloqueios_cadeia_publica(caminho_arquivo_json)
 
     # # ETAPA 4: A avaliação de denuncias na “begs” da cadeia.
-    main.avaliar_mendigos(caminho_arquivo_json, nome_cadeia, chave_privada, recompensa_like, min_reports_desafio)
+    main.avaliar_mendigos(caminho_arquivo_json, nome_cadeia, chave_privada, recompensa_entrada, min_reports_desafio)
 
     # ETAPA 5: Propaga para a rede eventuais dislikes/posts que nosso nó gerou neste ciclo
     # Não funciona
@@ -69,6 +70,7 @@ def iniciar_daemon(
     caminho_arquivo_json: Path,
     chave_privada: Path,
     recompensa_like: int,
+    recompensa_entrada: int,
     min_reports_desafio: int,
     intervalo_segundos: int = 60,
 ) -> None:
@@ -88,6 +90,7 @@ def iniciar_daemon(
                     caminho_arquivo_json=caminho_arquivo_json,
                     chave_privada=chave_privada,
                     recompensa_like=recompensa_like,
+                    recompensa_entrada=recompensa_entrada,
                     min_reports_desafio=min_reports_desafio
                 )
             except Exception as erro_ciclo:
@@ -117,5 +120,6 @@ if __name__ == "__main__":
         chave_privada=CHAVE_PRIVADA_PATH,
         intervalo_segundos=configuracao.INTERVALO_SEGUNDOS,
         recompensa_like=configuracao.RECOMPENSA_LIKE,
+        recompensa_entrada=configuracao.RECOMPENSA_ENTRADA,
         min_reports_desafio=configuracao.MIN_REPORTS_DESAFIO
     )

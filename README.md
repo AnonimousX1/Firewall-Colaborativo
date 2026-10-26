@@ -128,13 +128,13 @@ Ele executará os ciclos continuamente, aguardando `INTERVALO_SEGUNDOS` entre el
 Para bloquear manualmente um IP no UFW e reportá-lo na cadeia, informe o timestamp Unix e o motivo:
 
 ```bash
-python3 firewall.py ban 198.51.100.25 "$(date +%s)" "SSH brute force"
+python3 firewall.py ban 186.192.83.12 "$(date +%s)" "SSH brute force"
 ```
 
 Para remover o bloqueio local do UFW:
 
 ```bash
-python3 firewall.py unban 198.51.100.25
+python3 firewall.py unban 186.192.83.12
 ```
 
 O comando `unban` remove somente a regra local; ele não publica uma ação de desbloqueio na cadeia.
